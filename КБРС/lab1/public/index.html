@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Lab1</title>
+    <link rel="stylesheet" href="stylesheets/style.css">
+
+</head>
+<body>
+<div class="wrapper">
+
+    <div class="container">
+        <div class="main">
+            <div class="row">
+                <div class="col-sm-5 info">
+                    <div>
+                        <h2>Encryption</h2>
+                        <div>
+                            <input id="file-input" type="file" name="name" style="display:none"/>
+                        </div>
+                        <div>
+                            <input class="form-control" type="text"  id="word" placeholder="Secret word" >
+                        </div>
+                        <div>
+                            <button type="button" name="encode">
+                                Encode
+                            </button>
+                            <button  type="button" name="decode">
+                                Decode
+                            </button>
+                            <button  type="button" name="test">
+                                Test
+                            </button>
+                        </div>
+                        <div id="keys"></div>
+                    </div>
+                </div>
+
+            </div>
+
+
+        </div>
+    </div>
+</div>
+<script src="javascripts/main.js"></script>
+<script>Main.start()</script>
+</body>
+</html>
