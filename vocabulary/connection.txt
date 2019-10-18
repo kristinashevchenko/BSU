@@ -1,0 +1,35 @@
+создаем user
+sqlplus / as sysdba
+
+SHOW con_name; //CDB$ROOT - container database
+
+container id
+select name,cont_id from v$pdbs
+
+find service name
+select name from v$active_services WHERE con_id=3;
+
+find tnsnames.ora
+
+add pluguble database with copy
+
+
+lsnrctl reload
+
+sqlplus / as sysdba
+
+ALTER SESSION SET container = ORCLDB;
+
+check state
+SELECT name,open_mode from v$pdbs
+
+should be READ WRITE
+
+ALTER PLUGGABLE DATABASE open
+
+unlock user
+ALTER USER login IDENTIFIED BY password ACCOUNT UNLOCK;
+
+Connect iser
+SQLPLUS hr/hr@//localhost:1521/orclpdb OR SQLPLUS hr/hr@ORCLPDB
+
