@@ -25,6 +25,7 @@
     "oracledb": "^4.0.1",
     "path": "^0.12.7",
     "pos": "^0.4.2",
-    "sorted-map": "^0.1.8"
+    "sorted-map": "^0.1.8",
+    "wink-lemmatizer": "^3.0.1"
   }
 }

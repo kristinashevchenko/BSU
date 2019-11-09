@@ -12,12 +12,11 @@ const defaultCategoryCapitalized = 'NNP';
 var lexicon = new natural.Lexicon(language, defaultCategory, defaultCategoryCapitalized);
 var ruleSet = new natural.RuleSet('EN');
 var tagger = new natural.BrillPOSTagger(lexicon, ruleSet);
-
-const logger = require('morgan');
 const cookieParser = require('cookie-parser');
 const bodyParser = require('body-parser');
 const fileUpload = require('express-fileupload');
 const cors = require('cors');
+var lemmatize = require('wink-lemmatizer');
 
 const upload = multer();
 const table = require('./modules/table');
@@ -97,16 +96,12 @@ app.post('/uploadFile', (req, res, next) => {
             if (err) throw err;
             res.json({text: data, name: req.files.file.name});
         });
-
-
     });
-
 });
 
 app.get('/readFile', (req, res, next) => {
     let filename = req.query.filename;
     const name = `${__dirname}/corpus/${filename}`;
-
 
     fs.readFile(name, 'utf8', function (err, data) {
         if (err) throw err;
@@ -130,10 +125,7 @@ app.get('/readFile', (req, res, next) => {
                 map.set(word, {amount: num.amount + 1, code: num.code});
             } else {
                 const codes = lexicon.tagWord(word);
-                const code = codes.reduce(function (str, elem) {
-                    if (elem && elem !== '.') return str + (elem + ';');
-                    return str;
-                }, '');
+                const code = codes.join(';');
                 map.set(word, {amount: 1, code: code});
             }
 
@@ -143,6 +135,72 @@ app.get('/readFile', (req, res, next) => {
     });
 
 
+});
+
+app.get('/readAnnotateFile', (req, res, next) => {
+    let filename = req.query.filename;
+    let name = `${__dirname}/annotate/${filename}`;
+    let text = '';
+
+    fs.readFile(name, 'utf8', function (err, data) {
+        if (err) {
+            name = `${__dirname}/corpus/${filename}`;
+
+            fs.readFile(name, 'utf8', function (err, data2) {
+                if (err) throw err;
+                else {
+
+                    let sentenceTokenizer = new natural.SentenceTokenizer();
+                    let wordTokenizer = new natural.WordTokenizer();
+                    let sentences = sentenceTokenizer.tokenize(data2);
+                    sentences.forEach(sentence => {
+
+                            let words = wordTokenizer.tokenize(sentence);
+                            let taggedWords = tagger.tag(words).taggedWords;
+
+                            taggedWords.forEach(taggedWord => {
+                                let word = taggedWord.token;
+                                let tag = taggedWord.tag;
+                                let num = 0;
+                                let reg = new RegExp(`${word}`, "g");
+                                sentence = sentence.replace(reg, (match, offset, input) => {
+                                    if (offset - 1 > 0) {
+                                        if (sentence[offset - 1].match(/[\w>]{1}/))
+                                            return match;
+                                    }
+                                    if (offset + word.length < sentence.length) {
+                                        if (sentence[offset + word.length].match(/[\w<]{1}/))
+                                            return match;
+                                    }
+                                    num++;
+                                    if (num == 1) return `<${tag}>${match}</${tag}>`;
+                                    else return match;
+                                });
+                            });
+                            text += sentence;
+                        }
+                    );
+                    res.json({text});
+                }
+            });
+        } else {
+            text = data;
+            res.json({text});
+
+        }
+
+    });
+
+
+});
+
+
+app.post('/saveAnnotateFile', async (req, res, next) => {
+    const name = `${__dirname}/annotate/${req.body.file}`;
+    fs.writeFile(name, req.body.text, function (err, data) {
+        if (err) throw err;
+        res.sendStatus(200);
+    });
 });
 
 app.post('/saveFile', async (req, res, next) => {
@@ -179,20 +237,16 @@ app.post('/saveFile', async (req, res, next) => {
             //     return str;
             // }, '');
 
-            const code = codes.reduce(function (str, elem) {
-                if (elem && elem !== '.') return str + (elem + ';');
-                return str;
-            }, '');
+            const code = codes.join(';');
             map.set(word, {amount: 1, code: code});
         }
     });
-    const timest = Date.now();
+
     map.forEach(async function (item, key) {
         console.log(key, item.amount, id);
         let t = await insertWord(key, item.amount, id[0], item.code);
 
     });
-
     res.json({map: map, textLength: array.length});
 
 });
@@ -216,37 +270,88 @@ async function insertCorpus(name, wordNumber) {
 
 async function insertWord(key, item, id, code) {
     let connection = await pool.getConnection();
+    let canon_word = canonWord(key, code);
+
 
     const result = await connection.execute(
         "SELECT amount FROM dictionary WHERE word= :1", [key]);
-    //connection.close();
-    //let connection3 = await pool.getConnection();
+    const result1 = await connection.execute(
+        "SELECT amount FROM canon WHERE word= :1", [canon_word]);
+    let amount = item;
+    const codes = lexicon.tagWord(canon_word);
+    const canon_code = codes.join(';');
+    console.log(9, key, canon_word);
+
     if (!result.rows.length) {
 
         const result3 = await connection.execute(
-            `INSERT INTO dictionary (word,code,amount) VALUES(:key,:code,:item)`, {
+            `INSERT INTO dictionary (word,code,amount,canon_word) VALUES(:key,:code,:item,:canon_word)`, {
                 key: key,
                 code: code,
-                item: item
+                item: item,
+                canon_word: canon_word
             });
-        //connection3.close();
-        //console.log(result3);
+
     } else {
         console.log(result.rows[0]);
         const result3 = await connection.execute(
             `UPDATE dictionary SET amount= :1 WHERE word= :2`, [result.rows[0][0] + item, key]);
-        //connection3.close();
+
 
     }
 
-    //let connection2 = await pool.getConnection();
     const result2 = await connection.execute(
         `INSERT INTO WORDS (word,amount,corpus_id) VALUES(:key,:item,:id)`,
         {key: key, item: item, id: id});
+
+
+    if (!result1.rows.length) {
+
+        const result3 = await connection.execute(
+            `INSERT INTO canon (word,code,amount) VALUES(:key,:code,:item)`, {
+                key: canon_word,
+                code: canon_code,
+                item: amount
+            });
+
+    } else {
+        amount += result1.rows[0][0];
+        console.log(123, result.rows[0]);
+        const result3 = await connection.execute(
+            `UPDATE canon SET amount= :1 WHERE word= :2`, [amount, canon_word]);
+
+    }
     connection.close();
-
-
 }
+
+function canonWord(key, codes) {
+    codes = codes.split(';');
+    if (isVerb(codes)) {
+        return lemmatize.verb(key);
+    } else if (isNoun(codes)) {
+        return lemmatize.noun(key);
+    } else if (isAdjective(codes)) {
+        return lemmatize.adjective(key);
+    } else {
+        if (key != lemmatize.verb(key)) return lemmatize.verb(key);
+        if (key != lemmatize.noun(key)) return lemmatize.noun(key);
+        if (key != lemmatize.adjective(key)) return lemmatize.adjective(key);
+        return key;
+    }
+}
+
+function isAdjective(codes) {
+    return codes.some(elem => ['JJR', 'JJ', 'JJS'].includes(elem));
+}
+
+function isNoun(codes) {
+    return codes.some(elem => ['NN', 'NNP', 'NNPS', 'NNS', 'PP$', 'PRP', 'WP'].includes(elem));
+}
+
+function isVerb(codes) {
+    return codes.some(elem => ['RB', 'RBR', 'RBS', 'VB', 'VBD', 'VBG', 'VBN', 'VBP', 'VBZ', 'WRB'].includes(elem));
+}
+
 
 app.get('/corpuse', async (req, res, next) => {
     let connection = await pool.getConnection();
@@ -259,10 +364,12 @@ app.get('/corpuse', async (req, res, next) => {
 app.get('/deleteWord', async (req, res, next) => {
     let connection = await pool.getConnection();
     const word = req.query.word;
-    const result2 = await connection.execute(
-        "DELETE FROM words WHERE word= :1", [word]);
     const result = await connection.execute(
+        "DELETE FROM words WHERE word= :1", [word]);
+    const result2 = await connection.execute(
         "DELETE FROM dictionary WHERE word= :1", [word]);
+    const result3 = await connection.execute(
+        "DELETE FROM canon WHERE word= :1", [word]);
     connection.close();
     res.end();
 });
@@ -280,7 +387,7 @@ app.get('/changeWord', async (req, res, next) => {
     lexicon.addWord(word, newCodes);
 
     const result = await connection.execute(
-        "UPDATE dictionary SET code= :1 WHERE word= :2", [newCode, word]);
+        "UPDATE dictionary SET code= :1 WHERE word= :2", [req.query.code, word]);
     connection.close();
     res.end();
 });
@@ -289,9 +396,19 @@ app.get('/selectWord', async (req, res, next) => {
     let connection = await pool.getConnection();
     const word = req.query.word;
     const result = await connection.execute(
-        "SELECT corpus.name FROM words JOIN corpus ON(words.corpus_id=corpus.id) WHERE word= :1", [word]);
+        "SELECT DISTINCT corpus.name FROM words JOIN corpus ON(words.corpus_id=corpus.id) WHERE word= :1", [word]);
     connection.close();
     res.json({corpus: result.rows});
+});
+
+app.get('/getWord', async (req, res, next) => {
+    let connection = await pool.getConnection();
+    const word = req.query.word;
+    const result = await connection.execute(
+        "SELECT * FROM dictionary WHERE canon_word= :1", [word]);
+    connection.close();
+    console.log('word', result.rows);
+    res.json({words: result.rows});
 });
 
 app.get('/addWord', async (req, res, next) => {
@@ -300,20 +417,45 @@ app.get('/addWord', async (req, res, next) => {
     const result = await connection.execute(
         "SELECT * FROM dictionary WHERE word= :1", [word]);
     if (!result.rows.length) {
-        // var words = new pos.Lexer().lex(word);
-        // var tagger = new pos.Tagger();
-        // var taggedWords = tagger.tag(words);
-        //
-        // var taggedWord = taggedWords[0];
-        // var tag = taggedWord[1];
         const codes = lexicon.tagWord(word);
-        const code = codes.reduce(function (str, elem) {
-            if (elem && elem !== '.') return str + (elem + ';');
-            return str;
-        }, '');
+        const code = codes.join(';');
+        let canon_word = canonWord(word, code);
+        const result1 = await connection.execute(
+            "SELECT * FROM canon WHERE word= :1", [canon_word]);
+
+        if (!result1.rows.length) {
+
+            const canon_codes = lexicon.tagWord(canon_word);
+            const canon_code = canon_codes.join(';');
+
+            const result2 = await connection.execute(
+                `INSERT INTO canon (word,amount,code) VALUES(:key,:item,:code)`,
+                {key: canon_word, item: 0, code: canon_code});
+        }
+
+        const result3 = await connection.execute(
+            `INSERT INTO DICTIONARY (word,amount,code,canon_word) VALUES(:key,:item,:code,:canon_word)`,
+            {key: word, item: 0, code: code, canon_word: canon_word});
+        connection.close();
+        res.sendStatus(200);
+    } else {
+        res.sendStatus(404);
+    }
+});
+
+
+app.get('/addForm', async (req, res, next) => {
+    let connection = await pool.getConnection();
+    const word = req.query.word;
+    const formW = req.query.form;
+    const codeW = req.query.code;
+    const result = await connection.execute(
+        "SELECT * FROM dictionary WHERE word= :1", [formW]);
+    if (!result.rows.length) {
+
         const result2 = await connection.execute(
-            `INSERT INTO DICTIONARY (word,amount,code) VALUES(:key,:item,:code)`,
-            {key: word, item: 0, code: code});
+            `INSERT INTO dictionary (word,amount,code,canon_word) VALUES(:key,:item,:code,:canon_word)`,
+            {key: formW, item: 0, code: codeW, canon_word: word});
         connection.close();
         res.sendStatus(200);
     } else {
@@ -326,7 +468,7 @@ app.get('/dictionary', async (req, res, next) => {
 
     let connection = await pool.getConnection();
     const result = await connection.execute(
-        `SELECT * FROM dictionary`, [],
+        `SELECT * FROM canon`, [],
         {
             resultSet: true // return a ResultSet (default is false)
         });
@@ -335,7 +477,7 @@ app.get('/dictionary', async (req, res, next) => {
     let row;
     const map = new SortedMap();
     while ((row = await rs.getRow())) {
-        map.set(row[1], {amount: row[4], code: row[3]});
+        map.set(row[1], {amount: row[3], code: row[2]});
     }
     await rs.close();
     connection.close();
